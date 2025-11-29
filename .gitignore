@@ -1,0 +1,9 @@
+# Ignore local config file (user-specific)
+config.yaml
+
+# Keep example config in repo
+!config.example.yaml
+
+# Logs and executables
+*.log
+*.exe

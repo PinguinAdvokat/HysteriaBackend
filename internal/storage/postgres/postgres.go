@@ -1,37 +1,55 @@
 package postgres
 
 import (
-	"HysteriaBackend/internal/config"
 	"database/sql"
 	"log/slog"
-	"os"
+	"time"
 
 	_ "github.com/lib/pq"
-)
 
-type Client struct {
-	id        int
-	chat_id   int
-	username  string
-	subID     string
-	client_id string
-	expire    int
-}
+	"HysteriaBackend/internal/config"
+	"HysteriaBackend/internal/storage"
+)
 
 type PostgresStorage struct {
 	db *sql.DB
 }
 
-func (p *PostgresStorage) GetClientByClientID(clientID string) (Client, error) {
+func (p *PostgresStorage) GetClientByClientID(clientID string) (storage.Client, error) {
 	slog.Debug("Fetching client with clientID: %s", clientID, nil)
-	var client Client
+	var client storage.Client
 	query := "SELECT id, chat_id, username, subID, client_id, expire FROM users WHERE client_id = $1"
 	row := p.db.QueryRow(query, clientID)
-	err := row.Scan(&client.id, &client.chat_id, &client.username, &client.subID, &client.client_id, &client.expire)
+	err := row.Scan(&client.ID, &client.ChatID, &client.Username, &client.SubID, &client.ClientID, &client.Expire)
+	if err == sql.ErrNoRows {
+		return client, storage.ErrClientNotFound
+	}
 	return client, err
 }
 
-func MustLoad(cfg *config.Config) *PostgresStorage {
+func (p *PostgresStorage) CheckAccess(clientID string) (bool, storage.Client, error) {
+	client, err := p.GetClientByClientID(clientID)
+	if err != nil {
+		return false, client, err
+	}
+	slog.Debug("Client found", slog.Any("client", client))
+
+	now := int(time.Now().Unix())
+	slog.Debug("Current time", slog.Int("now", now), nil)
+	if client.Expire < now {
+		slog.Debug("Client subscription expired", slog.String("clientID", client.Username))
+		return false, client, nil
+	} else {
+		slog.Debug("Client subscription valid", slog.String("clientID", client.Username))
+		return true, client, nil
+	}
+}
+
+func (p *PostgresStorage) Close() error {
+	return p.db.Close()
+}
+
+func MustLoad(cfg *config.Config) (*PostgresStorage, error) {
 	connStr := "host=" + cfg.Database.Host +
 		" port=" + cfg.Database.Port +
 		" user=" + cfg.Database.User +
@@ -40,13 +58,10 @@ func MustLoad(cfg *config.Config) *PostgresStorage {
 		" sslmode=disable"
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
-		slog.Error("failed to connect to postgres: " + err.Error())
-		os.Exit(1)
-		return nil
+		return nil, err
 	}
 	if err := db.Ping(); err != nil {
-		slog.Error("Cant connect to database: " + err.Error())
-		os.Exit(1)
+		return nil, err
 	}
-	return &PostgresStorage{db: db}
+	return &PostgresStorage{db: db}, nil
 }

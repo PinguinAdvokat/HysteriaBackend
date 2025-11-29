@@ -3,6 +3,14 @@ package storage
 import "errors"
 
 var (
-	ErrUsernameTaken = errors.New("username taken")
-	ErrUserNotFound  = errors.New("user not found")
+	ErrClientNotFound = errors.New("client not found")
 )
+
+type Client struct {
+	ID       int
+	ChatID   int
+	Username string
+	SubID    string
+	ClientID string
+	Expire   int
+}

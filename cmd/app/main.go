@@ -1,14 +1,23 @@
 package main
 
 import (
-	"HysteriaBackend/internal/config"
-	"HysteriaBackend/internal/storage/postgres"
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
-	_ "net/http"
+	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/metrics"
+
+	"HysteriaBackend/internal/config"
+	"HysteriaBackend/internal/http-server/handlers/auth"
+	"HysteriaBackend/internal/storage/postgres"
 )
 
 func parseLogLevel(s string) slog.Level {
@@ -46,11 +55,61 @@ func main() {
 	slog.Info(fmt.Sprintf("Config: %#v", cfg))
 
 	// Initialize storage and perform a test query
-	storage := postgres.MustLoad(cfg)
-	slog.Info(fmt.Sprintf("Connected to database: %s", cfg.Database.Dbname))
-	user, err := storage.GetClientByClientID("ewq321fds654fsd")
+	storage, err := postgres.MustLoad(cfg)
 	if err != nil {
-		slog.Error(fmt.Sprintf("Failed to load users: %v", err))
+		slog.Error(fmt.Sprintf("Failed to connect to database: %v", err))
+		return
 	}
-	slog.Info(fmt.Sprintf("Loaded %d users from database", user))
+	slog.Info(fmt.Sprintf("Connected to database: %s", cfg.Database.Dbname))
+
+	// Set up HTTP server with metrics
+	router := chi.NewRouter()
+
+	router.Use(metrics.Collector(metrics.CollectorOpts{
+		Host:  false,
+		Proto: true,
+		Skip: func(r *http.Request) bool {
+			return r.Method != "OPTIONS"
+		},
+	}))
+	router.Handle("/metrics", metrics.Handler())
+	transport := metrics.Transport(metrics.TransportOpts{
+		Host: true,
+	})
+	http.DefaultClient.Transport = transport(http.DefaultTransport)
+
+	router.Post("/auth", auth.New(storage))
+
+	slog.Info(fmt.Sprintf("Starting HTTP server on %s", cfg.HTTPServer.Address))
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
+	srv := &http.Server{
+		Addr:         cfg.HTTPServer.Address,
+		Handler:      router,
+		ReadTimeout:  cfg.HTTPServer.Timeout,
+		WriteTimeout: cfg.HTTPServer.Timeout,
+		IdleTimeout:  cfg.HTTPServer.IdleTimeout,
+	}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil {
+			slog.Error("failed to start server")
+		}
+	}()
+
+	<-done
+	slog.Info("shutting down server")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		slog.Error("failed to shut down server gracefully", slog.Any("error", err))
+	}
+
+	if storage.Close() != nil {
+		slog.Error("failed to close storage")
+	}
+
+	slog.Info("server stopped")
 }

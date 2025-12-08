@@ -78,7 +78,7 @@ func main() {
 	})
 	http.DefaultClient.Transport = transport(http.DefaultTransport)
 
-	router.Post("/auth", auth.New(storage))
+	router.Post("/auth", auth.New(cfg, storage))
 
 	slog.Info(fmt.Sprintf("Starting HTTP server on %s", cfg.HTTPServer.Address))
 	done := make(chan os.Signal, 1)

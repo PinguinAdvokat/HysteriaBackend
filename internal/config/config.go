@@ -9,9 +9,15 @@ import (
 )
 
 type Config struct {
-	HysteriaSecret string     `yaml:"hysteria_secret" env-required:"true"`
-	Database       Database   `yaml:"database"`
-	HTTPServer     HTTPServer `yaml:"http_server"`
+	Hysteria   Hysteria   `yaml:"hysteria"`
+	Database   Database   `yaml:"database"`
+	HTTPServer HTTPServer `yaml:"http_server"`
+}
+
+type Hysteria struct {
+	Secret           string `yaml:"secret" env-required:"true"`
+	Port             string `yaml:"port" env-default:"443"`
+	TrafficStatsPort string `yaml:"traffic_stats_port" env-required:"true"`
 }
 
 type Database struct {

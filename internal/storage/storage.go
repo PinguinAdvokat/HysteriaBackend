@@ -13,4 +13,5 @@ type Client struct {
 	SubID    string
 	ClientID string
 	Expire   int
+	MaxConns int
 }

@@ -18,24 +18,28 @@ type PostgresStorage struct {
 func (p *PostgresStorage) GetClientByClientID(clientID string) (storage.Client, error) {
 	slog.Debug("Fetching client with clientID: %s", clientID, nil)
 	var client storage.Client
-	query := "SELECT id, chat_id, username, subID, client_id, expire FROM users WHERE client_id = $1"
+	query := "SELECT id, chat_id, username, subID, client_id, expire, max_conns FROM users WHERE client_id = $1"
 	row := p.db.QueryRow(query, clientID)
-	err := row.Scan(&client.ID, &client.ChatID, &client.Username, &client.SubID, &client.ClientID, &client.Expire)
+	err := row.Scan(&client.ID, &client.ChatID, &client.Username, &client.SubID, &client.ClientID, &client.Expire, &client.MaxConns)
 	if err == sql.ErrNoRows {
 		return client, storage.ErrClientNotFound
 	}
 	return client, err
 }
 
-func (p *PostgresStorage) CheckAccess(clientID string) (bool, storage.Client, error) {
+func (p *PostgresStorage) CheckAccess(clientID string, connections int) (bool, storage.Client, error) {
 	client, err := p.GetClientByClientID(clientID)
 	if err != nil {
 		return false, client, err
 	}
 	slog.Debug("Client found", slog.Any("client", client))
-
 	now := int(time.Now().Unix())
 	slog.Debug("Current time", slog.Int("now", now), nil)
+
+	if client.MaxConns > 0 && connections >= client.MaxConns {
+		slog.Debug("Client exceeded max connections", slog.String("clientID", client.Username))
+		return false, client, nil
+	}
 	if client.Expire < now {
 		slog.Debug("Client subscription expired", slog.String("clientID", client.Username))
 		return false, client, nil
